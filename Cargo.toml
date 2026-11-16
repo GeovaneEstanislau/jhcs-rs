@@ -8,6 +8,7 @@ members = [
     "crates/jhcs-platform",
     "crates/jhcs-platform-host",
     "crates/jhcs-platform-jinn",
+    "crates/jhcs-backend-wgpu",
     "examples/matrix-multiplication",
     "examples/benchmark-breakeven",
 ]

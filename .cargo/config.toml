@@ -1,6 +1,2 @@
 [target.x86_64-pc-windows-gnu]
 linker = "rust-lld"
-rustflags = [
-    "-L", "native=D:/Projetos/mingw64-libs",
-    "-C", "link-arg=D:/Projetos/mingw64-libs/crt2.o",
-]

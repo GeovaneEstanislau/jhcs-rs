@@ -1,0 +1,21 @@
+[package]
+name = "jhcs-backend-wgpu"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jinn OS Core Team"]
+description = "WebGPU compute backend for JHCS with WGSL shaders and transfer latency instrumentation"
+license = "Apache-2.0 OR MIT"
+
+[dependencies]
+jhcs-core = { path = "../jhcs-core" }
+wgpu = { version = "23", optional = true }
+pollster = { version = "0.4", optional = true }
+bytemuck = { version = "1.16", features = ["derive"], optional = true }
+
+[features]
+default = ["std"]
+std = ["wgpu", "pollster", "bytemuck"]
+
+[dev-dependencies]
+jhcs-backend-cpu = { path = "../jhcs-backend-cpu" }
+
