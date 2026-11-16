@@ -9,6 +9,7 @@ members = [
     "crates/jhcs-platform-host",
     "crates/jhcs-platform-jinn",
     "examples/matrix-multiplication",
+    "examples/benchmark-breakeven",
 ]
 
 [profile.dev]

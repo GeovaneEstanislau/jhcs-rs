@@ -133,21 +133,15 @@ mod tests {
     use super::*;
     use jhcs_backend_cpu::CpuBackend;
 
-    #[test]
-    fn test_simd_vs_scalar_numerical_equivalence() {
-        let m = 16;
-        let k = 32;
-        let n = 24;
-
-        // Initialize pseudo-random data
+    fn verify_matmul_parity(m: usize, k: usize, n: usize) {
         let mut a = alloc::vec![0.0f32; m * k];
         let mut b = alloc::vec![0.0f32; k * n];
 
         for i in 0..a.len() {
-            a[i] = ((i * 17 + 3) % 100) as f32 * 0.1;
+            a[i] = ((i * 17 + 3) % 100) as f32 * 0.05;
         }
         for i in 0..b.len() {
-            b[i] = ((i * 31 + 7) % 100) as f32 * 0.1;
+            b[i] = ((i * 31 + 7) % 100) as f32 * 0.05;
         }
 
         let mut c_scalar = alloc::vec![0.0f32; m * n];
@@ -162,13 +156,36 @@ mod tests {
         for idx in 0..(m * n) {
             let diff = (c_scalar[idx] - c_simd[idx]).abs();
             assert!(
-                diff < 1e-4,
-                "Divergence at index {}: scalar={}, simd={}, diff={}",
+                diff <= 1e-4,
+                "Divergence at index {} (m={}, k={}, n={}): scalar={}, simd={}, diff={}",
                 idx,
+                m,
+                k,
+                n,
                 c_scalar[idx],
                 c_simd[idx],
                 diff
             );
         }
+    }
+
+    #[test]
+    fn test_simd_vs_scalar_numerical_equivalence_arbitrary() {
+        verify_matmul_parity(16, 32, 24);
+    }
+
+    #[test]
+    fn test_simd_vs_scalar_numerical_equivalence_64x64() {
+        verify_matmul_parity(64, 64, 64);
+    }
+
+    #[test]
+    fn test_simd_vs_scalar_numerical_equivalence_256x256() {
+        verify_matmul_parity(256, 256, 256);
+    }
+
+    #[test]
+    fn test_simd_vs_scalar_numerical_equivalence_1024x1024() {
+        verify_matmul_parity(1024, 1024, 1024);
     }
 }

@@ -2,9 +2,7 @@
 
 use jhcs_core::error::ComputeError;
 
-/// Vectorized matrix multiplication kernel using 4-way and 8-way chunking.
-/// LLVM autovectorizes these chunked loops into SSE/AVX vector instructions
-/// when target features permit, maintaining 100% numerical portability.
+/// Vectorized matrix multiplication kernel using explicit SIMD intrinsics.
 pub fn matmul_f32_simd(
     a: &[f32],
     b: &[f32],
@@ -22,6 +20,93 @@ pub fn matmul_f32_simd(
 
     c.fill(0.0);
 
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        matmul_f32_simd_x86_sse(a, b, c, m, k, n);
+    }
+
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        matmul_f32_simd_fallback(a, b, c, m, k, n);
+    }
+
+    Ok(())
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse,sse2")]
+unsafe fn matmul_f32_simd_x86_sse(
+    a: &[f32],
+    b: &[f32],
+    c: &mut [f32],
+    m: usize,
+    k: usize,
+    n: usize,
+) {
+    use core::arch::x86_64::*;
+
+    for i in 0..m {
+        let a_row = i * k;
+        let c_row = i * n;
+
+        for p in 0..k {
+            let a_val = *a.get_unchecked(a_row + p);
+            let a_vec = _mm_set1_ps(a_val);
+            let b_row = p * n;
+
+            let mut j = 0;
+            // 16-wide unrolled SSE pipeline (4 x 128-bit vector registers)
+            while j + 16 <= n {
+                let c_ptr = c.as_mut_ptr().add(c_row + j);
+                let b_ptr = b.as_ptr().add(b_row + j);
+
+                let c0 = _mm_loadu_ps(c_ptr);
+                let b0 = _mm_loadu_ps(b_ptr);
+                _mm_storeu_ps(c_ptr, _mm_add_ps(c0, _mm_mul_ps(a_vec, b0)));
+
+                let c1 = _mm_loadu_ps(c_ptr.add(4));
+                let b1 = _mm_loadu_ps(b_ptr.add(4));
+                _mm_storeu_ps(c_ptr.add(4), _mm_add_ps(c1, _mm_mul_ps(a_vec, b1)));
+
+                let c2 = _mm_loadu_ps(c_ptr.add(8));
+                let b2 = _mm_loadu_ps(b_ptr.add(8));
+                _mm_storeu_ps(c_ptr.add(8), _mm_add_ps(c2, _mm_mul_ps(a_vec, b2)));
+
+                let c3 = _mm_loadu_ps(c_ptr.add(12));
+                let b3 = _mm_loadu_ps(b_ptr.add(12));
+                _mm_storeu_ps(c_ptr.add(12), _mm_add_ps(c3, _mm_mul_ps(a_vec, b3)));
+
+                j += 16;
+            }
+
+            while j + 4 <= n {
+                let c_ptr = c.as_mut_ptr().add(c_row + j);
+                let b_ptr = b.as_ptr().add(b_row + j);
+
+                let c0 = _mm_loadu_ps(c_ptr);
+                let b0 = _mm_loadu_ps(b_ptr);
+                _mm_storeu_ps(c_ptr, _mm_add_ps(c0, _mm_mul_ps(a_vec, b0)));
+
+                j += 4;
+            }
+
+            while j < n {
+                *c.get_unchecked_mut(c_row + j) += a_val * *b.get_unchecked(b_row + j);
+                j += 1;
+            }
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn matmul_f32_simd_fallback(
+    a: &[f32],
+    b: &[f32],
+    c: &mut [f32],
+    m: usize,
+    k: usize,
+    n: usize,
+) {
     for i in 0..m {
         let a_row = i * k;
         let c_row = i * n;
@@ -33,7 +118,6 @@ pub fn matmul_f32_simd(
             let c_slice = &mut c[c_row..c_row + n];
             let b_slice = &b[b_row..b_row + n];
 
-            // 8-wide chunked vector step
             let mut j = 0;
             while j + 8 <= n {
                 c_slice[j] += a_val * b_slice[j];
@@ -47,15 +131,12 @@ pub fn matmul_f32_simd(
                 j += 8;
             }
 
-            // Remainder scalar step
             while j < n {
                 c_slice[j] += a_val * b_slice[j];
                 j += 1;
             }
         }
     }
-
-    Ok(())
 }
 
 /// Vectorized element-wise addition: C = A + B
@@ -67,6 +148,53 @@ pub fn vector_add_f32_simd(a: &[f32], b: &[f32], c: &mut [f32]) -> Result<(), Co
         });
     }
 
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        vector_add_f32_simd_x86_sse(a, b, c);
+    }
+
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        vector_add_f32_simd_fallback(a, b, c);
+    }
+
+    Ok(())
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse,sse2")]
+unsafe fn vector_add_f32_simd_x86_sse(a: &[f32], b: &[f32], c: &mut [f32]) {
+    use core::arch::x86_64::*;
+    let n = a.len();
+    let mut i = 0;
+    while i + 16 <= n {
+        let a_ptr = a.as_ptr().add(i);
+        let b_ptr = b.as_ptr().add(i);
+        let c_ptr = c.as_mut_ptr().add(i);
+
+        _mm_storeu_ps(c_ptr, _mm_add_ps(_mm_loadu_ps(a_ptr), _mm_loadu_ps(b_ptr)));
+        _mm_storeu_ps(c_ptr.add(4), _mm_add_ps(_mm_loadu_ps(a_ptr.add(4)), _mm_loadu_ps(b_ptr.add(4))));
+        _mm_storeu_ps(c_ptr.add(8), _mm_add_ps(_mm_loadu_ps(a_ptr.add(8)), _mm_loadu_ps(b_ptr.add(8))));
+        _mm_storeu_ps(c_ptr.add(12), _mm_add_ps(_mm_loadu_ps(a_ptr.add(12)), _mm_loadu_ps(b_ptr.add(12))));
+        i += 16;
+    }
+
+    while i + 4 <= n {
+        let a_ptr = a.as_ptr().add(i);
+        let b_ptr = b.as_ptr().add(i);
+        let c_ptr = c.as_mut_ptr().add(i);
+        _mm_storeu_ps(c_ptr, _mm_add_ps(_mm_loadu_ps(a_ptr), _mm_loadu_ps(b_ptr)));
+        i += 4;
+    }
+
+    while i < n {
+        *c.get_unchecked_mut(i) = *a.get_unchecked(i) + *b.get_unchecked(i);
+        i += 1;
+    }
+}
+
+#[allow(dead_code)]
+fn vector_add_f32_simd_fallback(a: &[f32], b: &[f32], c: &mut [f32]) {
     let n = a.len();
     let mut i = 0;
     while i + 8 <= n {
@@ -85,6 +213,4 @@ pub fn vector_add_f32_simd(a: &[f32], b: &[f32], c: &mut [f32]) -> Result<(), Co
         c[i] = a[i] + b[i];
         i += 1;
     }
-
-    Ok(())
 }

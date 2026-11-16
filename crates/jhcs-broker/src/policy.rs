@@ -41,7 +41,8 @@ impl DispatchPolicy {
                 match task.requirements.parallelism {
                     ParallelismClass::Sequential => BackendKind::CpuScalar,
                     ParallelismClass::Vectorized128 | ParallelismClass::Vectorized256 | ParallelismClass::Vectorized512 => {
-                        if has_simd {
+                        // Workloads below 256 elements (< 16x16) suffer from broker dispatch overhead > SIMD gain
+                        if has_simd && problem_elements >= 256 {
                             BackendKind::CpuSimd
                         } else {
                             BackendKind::CpuScalar
