@@ -1,0 +1,13 @@
+[package]
+name = "jhcs-core"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jinn OS Core Team"]
+description = "Core abstraction layer for Jinn Heterogeneous Compute Service (JHCS)"
+license = "MIT OR Apache-2.0"
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]

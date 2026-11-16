@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/jhcs-core",
+    "crates/jhcs-broker",
+    "crates/jhcs-backend-cpu",
+    "crates/jhcs-backend-simd",
+    "crates/jhcs-platform",
+    "crates/jhcs-platform-host",
+    "crates/jhcs-platform-jinn",
+    "examples/matrix-multiplication",
+]
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

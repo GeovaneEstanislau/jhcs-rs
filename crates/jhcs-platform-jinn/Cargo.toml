@@ -1,0 +1,15 @@
+[package]
+name = "jhcs-platform-jinn"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jinn OS Core Team"]
+description = "Platform adapter contracts and stubs for native Jinn OS Ring 3 integration"
+license = "MIT OR Apache-2.0"
+
+[features]
+default = []
+std = ["jhcs-core/std", "jhcs-platform/std"]
+
+[dependencies]
+jhcs-core = { path = "../jhcs-core", default-features = false }
+jhcs-platform = { path = "../jhcs-platform", default-features = false }

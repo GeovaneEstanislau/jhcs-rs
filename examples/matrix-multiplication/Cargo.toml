@@ -1,0 +1,13 @@
+[package]
+name = "example-matrix-multiplication"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jinn OS Core Team"]
+description = "Demonstration of DAG-based heterogeneous matrix multiplication"
+publish = false
+
+[dependencies]
+jhcs-core = { path = "../../crates/jhcs-core" }
+jhcs-broker = { path = "../../crates/jhcs-broker" }
+jhcs-backend-cpu = { path = "../../crates/jhcs-backend-cpu" }
+jhcs-backend-simd = { path = "../../crates/jhcs-backend-simd" }

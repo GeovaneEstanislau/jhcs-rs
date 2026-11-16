@@ -1,0 +1,17 @@
+[package]
+name = "jhcs-backend-simd"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jinn OS Core Team"]
+description = "Vectorized CPU SIMD backend for JHCS (x86 SSE/AVX with automatic scalar fallback)"
+license = "MIT OR Apache-2.0"
+
+[features]
+default = ["std"]
+std = ["jhcs-core/std"]
+
+[dependencies]
+jhcs-core = { path = "../jhcs-core", default-features = false }
+
+[dev-dependencies]
+jhcs-backend-cpu = { path = "../jhcs-backend-cpu", default-features = false }

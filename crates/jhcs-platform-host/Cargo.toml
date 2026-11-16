@@ -1,0 +1,11 @@
+[package]
+name = "jhcs-platform-host"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jinn OS Core Team"]
+description = "Standard host platform adapter for Windows and Linux (std threads and timers)"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+jhcs-core = { path = "../jhcs-core" }
+jhcs-platform = { path = "../jhcs-platform" }

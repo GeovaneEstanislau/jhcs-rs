@@ -1,0 +1,20 @@
+[package]
+name = "jhcs-broker"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jinn OS Core Team"]
+description = "Compute Broker and dynamic task dispatcher for JHCS"
+license = "MIT OR Apache-2.0"
+
+[features]
+default = ["std"]
+std = [
+    "jhcs-core/std",
+    "jhcs-backend-cpu/std",
+    "jhcs-backend-simd/std",
+]
+
+[dependencies]
+jhcs-core = { path = "../jhcs-core", default-features = false }
+jhcs-backend-cpu = { path = "../jhcs-backend-cpu", default-features = false }
+jhcs-backend-simd = { path = "../jhcs-backend-simd", default-features = false }
