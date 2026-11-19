@@ -17,6 +17,7 @@ use alloc::string::ToString;
 use jhcs_core::capabilities::{
     BackendDescriptor, BackendKind, ComputeCapabilities, ParallelismClass,
 };
+use jhcs_core::contracts::ComputeBackend as ComputeBackendContract;
 use jhcs_core::task::{ComputeResult, TaskId};
 
 pub struct SimdBackend {
@@ -147,6 +148,24 @@ impl SimdBackend {
     ) -> (f32, ComputeResult) {
         let sum = reduce_sum_f32(input);
         (sum, ComputeResult::success(task_id, BackendKind::CpuSimd, 0))
+    }
+}
+
+impl ComputeBackendContract for SimdBackend {
+    fn id(&self) -> &'static str {
+        "cpu-simd-opt"
+    }
+
+    fn kind(&self) -> BackendKind {
+        BackendKind::CpuSimd
+    }
+
+    fn is_available(&self) -> bool {
+        self.has_sse || self.has_avx
+    }
+
+    fn capabilities(&self) -> &ComputeCapabilities {
+        &self.capabilities
     }
 }
 

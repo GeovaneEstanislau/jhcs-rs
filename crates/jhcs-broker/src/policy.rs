@@ -1,4 +1,7 @@
-//! Dispatch policies and backend selection algorithms.
+//! # Dispatch Policies and Backend Selection Algorithms
+//!
+//! Provides deterministic, safe, and cost-aware scheduling policies for selecting
+//! execution units across heterogeneous hardware resources.
 
 use jhcs_core::capabilities::{BackendKind, ParallelismClass};
 use jhcs_core::task::{ComputeBackend, ComputeTask};
@@ -7,16 +10,32 @@ use crate::metrics::MetricsRegistry;
 /// Policy strategy used by the broker to assign tasks to backends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DispatchPolicy {
-    /// Pure deterministic rules based on problem size, requirements, and hardware availability.
-    DeterministicRuleBased,
+    /// Strictly restricts all execution to scalar CPU (used for base validation or recovery).
+    CpuOnly,
+    /// Eagerly prefers vectorized SIMD/FPU whenever supported by the architecture.
+    PreferSimd,
+    /// Minimizes scheduling and transfer latency; avoids bus/DMA roundtrips for local processing.
+    LatencyFirst,
+    /// Maximizes aggregate parallel throughput by assigning large batches to GPU or wide SIMD.
+    ThroughputFirst,
+    /// Balanced standard policy: evaluates problem size, capabilities, and estimated total cost.
+    Balanced,
     /// Strictly forces a specific backend across all eligible tasks.
     ForceBackend(BackendKind),
     /// Cost-optimized based on historical overhead and execution measurements.
     CostOptimized,
+    /// Legacy deterministic rule-based alias (equivalent to Balanced).
+    DeterministicRuleBased,
+}
+
+impl Default for DispatchPolicy {
+    fn default() -> Self {
+        Self::Balanced
+    }
 }
 
 impl DispatchPolicy {
-    /// Selects the target backend for a given task according to the policy rules.
+    /// Selects the target backend for a given task according to the active policy.
     pub fn select_backend(
         &self,
         task: &ComputeTask,
@@ -25,34 +44,71 @@ impl DispatchPolicy {
         has_gpu: bool,
         metrics: &MetricsRegistry,
     ) -> BackendKind {
+        // 1. Strict override policies
         match self {
-            Self::ForceBackend(kind) => *kind,
+            Self::CpuOnly => return BackendKind::CpuScalar,
+            Self::ForceBackend(kind) => return *kind,
+            _ => {}
+        }
 
-            Self::DeterministicRuleBased => {
-                // Respect explicit task preferences first
-                match task.preferred_backend {
-                    ComputeBackend::Cpu => return BackendKind::CpuScalar,
-                    ComputeBackend::Simd if has_simd => return BackendKind::CpuSimd,
-                    ComputeBackend::Gpu if has_gpu => return BackendKind::GpuCompute,
-                    _ => {}
+        // 2. Explicit task request (if allowed by hardware)
+        match task.preferred_backend {
+            ComputeBackend::Cpu => return BackendKind::CpuScalar,
+            ComputeBackend::Simd if has_simd => return BackendKind::CpuSimd,
+            ComputeBackend::Gpu if has_gpu => return BackendKind::GpuCompute,
+            _ => {}
+        }
+
+        // 3. Policy-driven selection
+        match self {
+            Self::CpuOnly | Self::ForceBackend(_) => unreachable!(),
+
+            Self::PreferSimd => {
+                if has_simd && problem_elements >= 8 {
+                    BackendKind::CpuSimd
+                } else {
+                    BackendKind::CpuScalar
                 }
+            }
 
-                // Problem size and parallelism heuristic
+            Self::LatencyFirst => {
+                // Latency-first avoids bus/GPU DMA transfer and driver handshake latency
+                if has_simd && problem_elements >= 64 {
+                    BackendKind::CpuSimd
+                } else {
+                    BackendKind::CpuScalar
+                }
+            }
+
+            Self::ThroughputFirst => {
+                // High throughput utilizes massive parallelism for large jobs
+                if has_gpu && problem_elements >= 1024 {
+                    BackendKind::GpuCompute
+                } else if has_simd && problem_elements >= 128 {
+                    BackendKind::CpuSimd
+                } else {
+                    BackendKind::CpuScalar
+                }
+            }
+
+            Self::Balanced | Self::DeterministicRuleBased => {
                 match task.requirements.parallelism {
                     ParallelismClass::Sequential => BackendKind::CpuScalar,
-                    ParallelismClass::Vectorized128 | ParallelismClass::Vectorized256 | ParallelismClass::Vectorized512 => {
-                        // Workloads below 256 elements (< 16x16) suffer from broker dispatch overhead > SIMD gain
-                        if has_simd && problem_elements >= 256 {
+                    ParallelismClass::Vectorized128
+                    | ParallelismClass::Vectorized256
+                    | ParallelismClass::Vectorized512 => {
+                        // Workloads below 64 elements have setup cost > vectorization gain
+                        if has_simd && problem_elements >= 64 {
                             BackendKind::CpuSimd
                         } else {
                             BackendKind::CpuScalar
                         }
                     }
                     ParallelismClass::MassiveParallelGpu => {
-                        // Small workloads (< 64 elements) have negative GPU return due to transfer overhead
+                        // Small workloads (< 1024 elements) have negative GPU return due to transfer overhead
                         if has_gpu && problem_elements >= 1024 {
                             BackendKind::GpuCompute
-                        } else if has_simd {
+                        } else if has_simd && problem_elements >= 64 {
                             BackendKind::CpuSimd
                         } else {
                             BackendKind::CpuScalar

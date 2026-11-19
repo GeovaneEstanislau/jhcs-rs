@@ -1,6 +1,7 @@
-//! Task definitions, dependency tracking and execution results.
+//! # Task definitions, dependency tracking and execution results.
 
 extern crate alloc;
+use alloc::string::String;
 use alloc::vec::Vec;
 use crate::buffer::BufferSet;
 use crate::capabilities::{BackendKind, ComputeRequirements};
@@ -29,6 +30,23 @@ pub const OP_VECTOR_ADD: OperationId = OperationId("vector_add");
 pub const OP_CONV2D: OperationId = OperationId("conv2d");
 pub const OP_RELU: OperationId = OperationId("relu");
 pub const OP_SCALE: OperationId = OperationId("scale");
+pub const OP_REDUCE_SUM: OperationId = OperationId("reduce_sum");
+pub const OP_DOT_PRODUCT: OperationId = OperationId("dot_product");
+
+/// Execution priority levels for scheduling and resource contention resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TaskPriority {
+    Low = 0,
+    Normal = 1,
+    High = 2,
+    Critical = 3,
+}
+
+impl Default for TaskPriority {
+    fn default() -> Self {
+        Self::Normal
+    }
+}
 
 /// Target execution backend hint or policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -93,6 +111,9 @@ pub struct ComputeTask {
     pub requirements: ComputeRequirements,
     pub dependencies: DependencySet,
     pub preferred_backend: ComputeBackend,
+    pub priority: TaskPriority,
+    pub deadline_ns: Option<u64>,
+    pub allow_in_place: bool,
 }
 
 impl ComputeTask {
@@ -110,6 +131,9 @@ impl ComputeTask {
             requirements: ComputeRequirements::default_scalar(),
             dependencies: DependencySet::new(),
             preferred_backend: ComputeBackend::Automatic,
+            priority: TaskPriority::Normal,
+            deadline_ns: None,
+            allow_in_place: false,
         }
     }
 
@@ -125,6 +149,21 @@ impl ComputeTask {
 
     pub fn with_backend(mut self, backend: ComputeBackend) -> Self {
         self.preferred_backend = backend;
+        self
+    }
+
+    pub fn with_priority(mut self, priority: TaskPriority) -> Self {
+        self.priority = priority;
+        self
+    }
+
+    pub fn with_deadline_ns(mut self, deadline_ns: u64) -> Self {
+        self.deadline_ns = Some(deadline_ns);
+        self
+    }
+
+    pub fn with_in_place(mut self, allow: bool) -> Self {
+        self.allow_in_place = allow;
         self
     }
 }
@@ -151,6 +190,7 @@ pub struct ComputeResult {
     pub exec_duration_ns: u64,
     pub sync_duration_ns: u64,
     pub total_duration_ns: u64,
+    pub strategy_used: Option<String>,
     pub error: Option<ComputeError>,
 }
 
@@ -165,6 +205,27 @@ impl ComputeResult {
             exec_duration_ns: exec_ns,
             sync_duration_ns: 0,
             total_duration_ns: exec_ns,
+            strategy_used: None,
+            error: None,
+        }
+    }
+
+    pub fn success_with_strategy(
+        task_id: TaskId,
+        executed_by: BackendKind,
+        exec_ns: u64,
+        strategy: String,
+    ) -> Self {
+        Self {
+            task_id,
+            status: TaskStatus::Completed,
+            executed_by,
+            prep_duration_ns: 0,
+            transfer_duration_ns: 0,
+            exec_duration_ns: exec_ns,
+            sync_duration_ns: 0,
+            total_duration_ns: exec_ns,
+            strategy_used: Some(strategy),
             error: None,
         }
     }
@@ -179,6 +240,7 @@ impl ComputeResult {
             exec_duration_ns: 0,
             sync_duration_ns: 0,
             total_duration_ns: 0,
+            strategy_used: None,
             error: Some(error),
         }
     }

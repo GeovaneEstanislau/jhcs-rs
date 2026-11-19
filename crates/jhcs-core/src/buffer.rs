@@ -1,4 +1,4 @@
-//! Memory buffer abstractions and handles for heterogeneous compute.
+//! # Memory buffer abstractions and handles for heterogeneous compute.
 
 extern crate alloc;
 use alloc::vec::Vec;
@@ -50,6 +50,51 @@ impl Precision {
     }
 }
 
+/// Memory buffer ownership semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BufferOwnership {
+    /// Buffer is owned exclusively by the current process or task.
+    Owned,
+    /// Buffer is temporarily borrowed (read or write slice).
+    Borrowed,
+    /// Buffer is shared across processes or execution units via zero-copy shmem.
+    Shared,
+}
+
+/// Read/write access rights for a buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BufferAccessMode {
+    ReadOnly,
+    WriteOnly,
+    ReadWrite,
+}
+
+/// Synchronization and cache coherency status between host and accelerator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BufferSyncState {
+    /// Host and device representations are strictly identical.
+    Clean,
+    /// Modified locally; pending flush or device commit.
+    Modified,
+    /// Currently being transferred via DMA or GPU asynchronous pipeline.
+    InFlight,
+    /// Incoherent or invalidated; requires fresh re-fetch before access.
+    Incoherent,
+}
+
+/// Universal trait representing a managed compute buffer without exposing raw pointers.
+pub trait ComputeBuffer: Send + Sync {
+    fn handle(&self) -> BufferHandle;
+    fn size_bytes(&self) -> usize;
+    fn precision(&self) -> Precision;
+    fn location(&self) -> BufferLocation;
+    fn alignment(&self) -> usize;
+    fn ownership(&self) -> BufferOwnership;
+    fn access_mode(&self) -> BufferAccessMode;
+    fn sync_state(&self) -> BufferSyncState;
+    fn is_valid(&self) -> bool;
+}
+
 /// Metadata description of a buffer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BufferDescriptor {
@@ -57,6 +102,11 @@ pub struct BufferDescriptor {
     pub size_bytes: usize,
     pub location: BufferLocation,
     pub precision: Precision,
+    pub alignment: usize,
+    pub ownership: BufferOwnership,
+    pub access_mode: BufferAccessMode,
+    pub sync_state: BufferSyncState,
+    pub is_valid: bool,
     /// Optional dimension tensor shape: [rows, cols, depth, batch]
     pub shape: [usize; 4],
 }
@@ -73,6 +123,11 @@ impl BufferDescriptor {
             size_bytes,
             location,
             precision,
+            alignment: 64, // Default cache line / AVX512 alignment
+            ownership: BufferOwnership::Owned,
+            access_mode: BufferAccessMode::ReadWrite,
+            sync_state: BufferSyncState::Clean,
+            is_valid: true,
             shape: [size_bytes, 1, 1, 1],
         }
     }
@@ -90,8 +145,71 @@ impl BufferDescriptor {
             size_bytes,
             location,
             precision,
+            alignment: 64,
+            ownership: BufferOwnership::Owned,
+            access_mode: BufferAccessMode::ReadWrite,
+            sync_state: BufferSyncState::Clean,
+            is_valid: true,
             shape: [rows, cols, 1, 1],
         }
+    }
+
+    pub fn with_alignment(mut self, align: usize) -> Self {
+        self.alignment = align;
+        self
+    }
+
+    pub fn with_ownership(mut self, ownership: BufferOwnership) -> Self {
+        self.ownership = ownership;
+        self
+    }
+
+    pub fn with_access_mode(mut self, mode: BufferAccessMode) -> Self {
+        self.access_mode = mode;
+        self
+    }
+
+    pub fn with_sync_state(mut self, state: BufferSyncState) -> Self {
+        self.sync_state = state;
+        self
+    }
+}
+
+impl ComputeBuffer for BufferDescriptor {
+    fn handle(&self) -> BufferHandle {
+        self.handle
+    }
+
+    fn size_bytes(&self) -> usize {
+        self.size_bytes
+    }
+
+    fn precision(&self) -> Precision {
+        self.precision
+    }
+
+    fn location(&self) -> BufferLocation {
+        self.location
+    }
+
+    fn alignment(&self) -> usize {
+        self.alignment
+    }
+
+    fn ownership(&self) -> BufferOwnership {
+        self.ownership
+    }
+
+    fn access_mode(&self) -> BufferAccessMode {
+        self.access_mode
+    }
+
+    fn sync_state(&self) -> BufferSyncState {
+        self.sync_state
+    }
+
+    fn is_valid(&self) -> bool {
+        self.is_valid
     }
 }
 

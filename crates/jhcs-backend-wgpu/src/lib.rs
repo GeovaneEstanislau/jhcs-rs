@@ -8,6 +8,7 @@ use alloc::string::ToString;
 use jhcs_core::capabilities::{
     BackendDescriptor, BackendKind, ComputeCapabilities, ParallelismClass,
 };
+use jhcs_core::contracts::ComputeBackend as ComputeBackendContract;
 use jhcs_core::error::ComputeError;
 use jhcs_core::task::{ComputeResult, TaskId};
 
@@ -331,6 +332,24 @@ impl WgpuBackend {
             let _ = (task_id, a, b, c, m, k, n);
             ComputeResult::failure(task_id, BackendKind::GpuCompute, ComputeError::BackendUnavailable)
         }
+    }
+}
+
+impl ComputeBackendContract for WgpuBackend {
+    fn id(&self) -> &'static str {
+        "gpu-wgpu-primary"
+    }
+
+    fn kind(&self) -> BackendKind {
+        BackendKind::GpuCompute
+    }
+
+    fn is_available(&self) -> bool {
+        self.descriptor.is_available
+    }
+
+    fn capabilities(&self) -> &ComputeCapabilities {
+        &self.capabilities
     }
 }
 
