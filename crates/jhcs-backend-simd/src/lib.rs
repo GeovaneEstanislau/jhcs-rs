@@ -8,8 +8,10 @@
 extern crate alloc;
 
 pub mod matmul;
+pub mod ops;
 
 pub use matmul::{matmul_f32_simd, vector_add_f32_simd};
+pub use ops::{conv2d_f32, conv2d_f32_scalar, reduce_sum_f32, reduce_sum_f32_scalar};
 
 use alloc::string::ToString;
 use jhcs_core::capabilities::{
@@ -56,6 +58,8 @@ impl SimdBackend {
                     "matmul".to_string(),
                     "vector_add".to_string(),
                     "relu".to_string(),
+                    "conv2d".to_string(),
+                    "reduce_sum".to_string(),
                 ],
             },
             descriptor: BackendDescriptor {
@@ -120,6 +124,30 @@ impl SimdBackend {
             Err(e) => ComputeResult::failure(task_id, BackendKind::CpuSimd, e),
         }
     }
+
+    pub fn execute_conv2d(
+        &self,
+        task_id: TaskId,
+        input: &[f32],
+        in_h: usize,
+        in_w: usize,
+        kernel: &[f32],
+        k_h: usize,
+        k_w: usize,
+        output: &mut [f32],
+    ) -> ComputeResult {
+        conv2d_f32(input, in_h, in_w, kernel, k_h, k_w, output);
+        ComputeResult::success(task_id, BackendKind::CpuSimd, 0)
+    }
+
+    pub fn execute_reduce_sum(
+        &self,
+        task_id: TaskId,
+        input: &[f32],
+    ) -> (f32, ComputeResult) {
+        let sum = reduce_sum_f32(input);
+        (sum, ComputeResult::success(task_id, BackendKind::CpuSimd, 0))
+    }
 }
 
 impl Default for SimdBackend {
@@ -148,22 +176,18 @@ mod tests {
         let mut c_simd = alloc::vec![0.0f32; m * n];
 
         let cpu = CpuBackend::new();
-        let simd = SimdBackend::new();
+        cpu.execute_matmul(jhcs_core::task::TaskId::new(1), &a, &b, &mut c_scalar, m, k, n);
 
-        cpu.execute_matmul(TaskId::new(1), &a, &b, &mut c_scalar, m, k, n);
-        simd.execute_matmul(TaskId::new(2), &a, &b, &mut c_simd, m, k, n);
+        matmul_f32_simd(&a, &b, &mut c_simd, m, k, n).expect("SIMD matmul should succeed");
 
-        for idx in 0..(m * n) {
-            let diff = (c_scalar[idx] - c_simd[idx]).abs();
+        for i in 0..c_scalar.len() {
+            let diff = (c_scalar[i] - c_simd[i]).abs();
             assert!(
-                diff <= 1e-4,
-                "Divergence at index {} (m={}, k={}, n={}): scalar={}, simd={}, diff={}",
-                idx,
-                m,
-                k,
-                n,
-                c_scalar[idx],
-                c_simd[idx],
+                diff < 1e-4,
+                "Parity failure at {}: scalar={}, simd={}, diff={}",
+                i,
+                c_scalar[i],
+                c_simd[i],
                 diff
             );
         }
@@ -187,5 +211,111 @@ mod tests {
     #[test]
     fn test_simd_vs_scalar_numerical_equivalence_1024x1024() {
         verify_matmul_parity(1024, 1024, 1024);
+    }
+
+    #[test]
+    fn test_reduce_sum_parity() {
+        let sizes = [0, 1, 7, 8, 15, 31, 32, 64, 127, 256, 1024, 65536];
+        for &sz in &sizes {
+            let mut data = alloc::vec![0.0f32; sz];
+            for i in 0..sz {
+                data[i] = ((i * 13 + 5) % 100) as f32 * 0.02 - 1.0;
+            }
+
+            let sum_scalar = reduce_sum_f32_scalar(&data);
+            let sum_simd = reduce_sum_f32(&data);
+
+            let diff = (sum_scalar - sum_simd).abs();
+            let tolerance = 1e-3 * (sz as f32).max(1.0);
+            assert!(
+                diff <= tolerance,
+                "Reduce sum mismatch for size {}: scalar={}, simd={}, diff={}, tol={}",
+                sz,
+                sum_scalar,
+                sum_simd,
+                diff,
+                tolerance
+            );
+        }
+    }
+
+    #[test]
+    fn test_conv2d_parity() {
+        // Test case 1: 3x3 kernel on 16x16
+        {
+            let in_h = 16;
+            let in_w = 16;
+            let k_h = 3;
+            let k_w = 3;
+            let out_h = in_h - k_h + 1;
+            let out_w = in_w - k_w + 1;
+
+            let mut input = alloc::vec![0.0f32; in_h * in_w];
+            for i in 0..input.len() {
+                input[i] = (i % 20) as f32 * 0.1;
+            }
+
+            let kernel = [
+                0.0625, 0.125, 0.0625,
+                0.125,  0.25,  0.125,
+                0.0625, 0.125, 0.0625,
+            ];
+
+            let mut out_scalar = alloc::vec![0.0f32; out_h * out_w];
+            let mut out_simd = alloc::vec![0.0f32; out_h * out_w];
+
+            conv2d_f32_scalar(&input, in_w, &kernel, k_h, k_w, &mut out_scalar, out_h, out_w);
+            conv2d_f32(&input, in_h, in_w, &kernel, k_h, k_w, &mut out_simd);
+
+            for i in 0..out_scalar.len() {
+                let diff = (out_scalar[i] - out_simd[i]).abs();
+                assert!(
+                    diff < 1e-4,
+                    "Conv2D mismatch at {}: scalar={}, simd={}, diff={}",
+                    i,
+                    out_scalar[i],
+                    out_simd[i],
+                    diff
+                );
+            }
+        }
+
+        // Test case 2: 5x5 kernel on 32x32
+        {
+            let in_h = 32;
+            let in_w = 32;
+            let k_h = 5;
+            let k_w = 5;
+            let out_h = in_h - k_h + 1;
+            let out_w = in_w - k_w + 1;
+
+            let mut input = alloc::vec![0.0f32; in_h * in_w];
+            for i in 0..input.len() {
+                input[i] = ((i * 7 + 11) % 50) as f32 * 0.05;
+            }
+
+            let mut kernel = [0.0f32; 25];
+            for i in 0..25 {
+                kernel[i] = ((i * 3 + 1) % 10) as f32 * 0.01;
+            }
+
+            let mut out_scalar = alloc::vec![0.0f32; out_h * out_w];
+            let mut out_simd = alloc::vec![0.0f32; out_h * out_w];
+
+            conv2d_f32_scalar(&input, in_w, &kernel, k_h, k_w, &mut out_scalar, out_h, out_w);
+            conv2d_f32(&input, in_h, in_w, &kernel, k_h, k_w, &mut out_simd);
+
+            for i in 0..out_scalar.len() {
+                let diff = (out_scalar[i] - out_simd[i]).abs();
+                assert!(
+                    diff < 1e-4,
+                    "Conv2D mismatch at {}: scalar={}, simd={}, diff={}",
+                    i,
+                    out_scalar[i],
+                    out_simd[i],
+                    diff
+                );
+            }
+        }
     }
 }
