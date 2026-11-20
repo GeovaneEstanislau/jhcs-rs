@@ -239,3 +239,94 @@ pub unsafe fn conv2d_f32_avx2_fma(
         }
     }
 }
+
+/// Redimensionamento bilinear de imagens RGBA com aceleração e fallback escalar.
+pub fn scale_image_rgba_simd(
+    src: &[u32],
+    src_w: usize,
+    src_h: usize,
+    dst: &mut [u32],
+    dst_w: usize,
+    dst_h: usize,
+) {
+    if src_w == 0 || src_h == 0 || dst_w == 0 || dst_h == 0 {
+        return;
+    }
+    if src.len() < src_w * src_h || dst.len() < dst_w * dst_h {
+        return;
+    }
+
+    let x_ratio = ((src_w << 16) / dst_w) as u32;
+    let y_ratio = ((src_h << 16) / dst_h) as u32;
+
+    for y in 0..dst_h {
+        let sy = (y as u32 * y_ratio) >> 16;
+        let y_diff = ((y as u32 * y_ratio) & 0xFFFF) as u32;
+        let y_diff_inv = 0x10000 - y_diff;
+        let sy1 = (sy + 1).min(src_h as u32 - 1) as usize;
+        let sy0 = sy as usize;
+
+        let row_dst = y * dst_w;
+        let row_src0 = sy0 * src_w;
+        let row_src1 = sy1 * src_w;
+
+        for x in 0..dst_w {
+            let sx = (x as u32 * x_ratio) >> 16;
+            let x_diff = ((x as u32 * x_ratio) & 0xFFFF) as u32;
+            let x_diff_inv = 0x10000 - x_diff;
+            let sx1 = (sx + 1).min(src_w as u32 - 1) as usize;
+            let sx0 = sx as usize;
+
+            let p00 = src[row_src0 + sx0];
+            let p10 = src[row_src0 + sx1];
+            let p01 = src[row_src1 + sx0];
+            let p11 = src[row_src1 + sx1];
+
+            let mut out_pixel = 0u32;
+            for shift in [0, 8, 16, 24] {
+                let c00 = ((p00 >> shift) & 0xFF) as u32;
+                let c10 = ((p10 >> shift) & 0xFF) as u32;
+                let c01 = ((p01 >> shift) & 0xFF) as u32;
+                let c11 = ((p11 >> shift) & 0xFF) as u32;
+
+                let top = (c00 * x_diff_inv + c10 * x_diff) >> 16;
+                let bottom = (c01 * x_diff_inv + c11 * x_diff) >> 16;
+                let final_c = ((top * y_diff_inv + bottom * y_diff) >> 16) & 0xFF;
+                out_pixel |= final_c << shift;
+            }
+            dst[row_dst + x] = out_pixel;
+        }
+    }
+}
+
+/// Composição alfa em lote para buffers RGBA com fallback escalar.
+pub fn alpha_blend_rgba_batch_simd(dst: &mut [u32], src: &[u32], len: usize) {
+    let count = len.min(dst.len()).min(src.len());
+    let mut i = 0;
+
+    while i < count {
+        let s = src[i];
+        let sa = (s >> 24) & 0xFF;
+        if sa == 255 {
+            dst[i] = s;
+        } else if sa > 0 {
+            let d = dst[i];
+            let inv_a = 255 - sa;
+
+            let sr = (s >> 16) & 0xFF;
+            let sg = (s >> 8) & 0xFF;
+            let sb = s & 0xFF;
+
+            let dr = (d >> 16) & 0xFF;
+            let dg = (d >> 8) & 0xFF;
+            let db = d & 0xFF;
+
+            let out_r = (sr * sa + dr * inv_a) / 255;
+            let out_g = (sg * sa + dg * inv_a) / 255;
+            let out_b = (sb * sa + db * inv_a) / 255;
+
+            dst[i] = (0xFF << 24) | (out_r << 16) | (out_g << 8) | out_b;
+        }
+        i += 1;
+    }
+}
