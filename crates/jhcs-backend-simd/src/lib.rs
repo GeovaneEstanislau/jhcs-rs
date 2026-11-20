@@ -1,4 +1,5 @@
 #![cfg_attr(not(feature = "std"), no_std)]
+#![allow(x86_softfloat_sse)]
 
 //! # JHCS Backend SIMD — Vectorized CPU Backend
 //!

@@ -18,18 +18,16 @@ pub fn detect_avx2_fma() -> (bool, bool) {
     }
     #[cfg(all(target_arch = "x86_64", not(feature = "std")))]
     {
-        unsafe {
-            let res = core::arch::x86_64::__cpuid(1);
-            let has_fma = (res.ecx & (1 << 12)) != 0;
-            let has_osxsave = (res.ecx & (1 << 27)) != 0;
-            let has_avx = (res.ecx & (1 << 28)) != 0;
-            if has_osxsave && has_avx {
-                let res7 = core::arch::x86_64::__cpuid_count(7, 0);
-                let has_avx2 = (res7.ebx & (1 << 5)) != 0;
-                (has_avx2, has_fma)
-            } else {
-                (false, false)
-            }
+        let res = core::arch::x86_64::__cpuid(1);
+        let has_fma = (res.ecx & (1 << 12)) != 0;
+        let has_osxsave = (res.ecx & (1 << 27)) != 0;
+        let has_avx = (res.ecx & (1 << 28)) != 0;
+        if has_osxsave && has_avx {
+            let res7 = core::arch::x86_64::__cpuid_count(7, 0);
+            let has_avx2 = (res7.ebx & (1 << 5)) != 0;
+            (has_avx2, has_fma)
+        } else {
+            (false, false)
         }
     }
     #[cfg(not(target_arch = "x86_64"))]
