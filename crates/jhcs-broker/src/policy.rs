@@ -24,6 +24,10 @@ pub enum DispatchPolicy {
     ForceBackend(BackendKind),
     /// Cost-optimized based on historical overhead and execution measurements.
     CostOptimized,
+    /// Zero-GPU High Efficiency Policy:
+    /// Treats CPU SIMD (AVX2/SSE2) as a first-class high-performance parallel compute engine.
+    /// Eliminates all bus/DMA transfers and lock contention, dispatching directly to SIMD kernels.
+    ZeroGpuOptimized,
     /// Legacy deterministic rule-based alias (equivalent to Balanced).
     DeterministicRuleBased,
 }
@@ -65,6 +69,15 @@ impl DispatchPolicy {
 
             Self::PreferSimd => {
                 if has_simd && problem_elements >= 8 {
+                    BackendKind::CpuSimd
+                } else {
+                    BackendKind::CpuScalar
+                }
+            }
+
+            Self::ZeroGpuOptimized => {
+                // Modo Zero-GPU: SIMD vetorial de altíssima eficiência sem overhead de GPU/DMA
+                if has_simd && problem_elements >= 4 {
                     BackendKind::CpuSimd
                 } else {
                     BackendKind::CpuScalar

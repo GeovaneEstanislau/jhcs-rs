@@ -22,7 +22,12 @@ pub fn matmul_f32_simd(
 
     #[cfg(target_arch = "x86_64")]
     unsafe {
-        matmul_f32_simd_x86_sse(a, b, c, m, k, n);
+        let (has_avx2, has_fma) = crate::ops::detect_avx2_fma();
+        if has_avx2 && has_fma && n >= 8 {
+            matmul_f32_simd_x86_avx2_fma(a, b, c, m, k, n);
+        } else {
+            matmul_f32_simd_x86_sse(a, b, c, m, k, n);
+        }
     }
 
     #[cfg(not(target_arch = "x86_64"))]
@@ -31,6 +36,71 @@ pub fn matmul_f32_simd(
     }
 
     Ok(())
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+unsafe fn matmul_f32_simd_x86_avx2_fma(
+    a: &[f32],
+    b: &[f32],
+    c: &mut [f32],
+    m: usize,
+    k: usize,
+    n: usize,
+) {
+    use core::arch::x86_64::*;
+
+    for i in 0..m {
+        let a_row = i * k;
+        let c_row = i * n;
+
+        for p in 0..k {
+            let a_val = *a.get_unchecked(a_row + p);
+            let a_vec = _mm256_set1_ps(a_val);
+            let b_row = p * n;
+
+            let mut j = 0;
+            // 32-wide unrolled AVX2+FMA pipeline (4 x 256-bit vector registers)
+            while j + 32 <= n {
+                let c_ptr = c.as_mut_ptr().add(c_row + j);
+                let b_ptr = b.as_ptr().add(b_row + j);
+
+                let c0 = _mm256_loadu_ps(c_ptr);
+                let b0 = _mm256_loadu_ps(b_ptr);
+                _mm256_storeu_ps(c_ptr, _mm256_fmadd_ps(a_vec, b0, c0));
+
+                let c1 = _mm256_loadu_ps(c_ptr.add(8));
+                let b1 = _mm256_loadu_ps(b_ptr.add(8));
+                _mm256_storeu_ps(c_ptr.add(8), _mm256_fmadd_ps(a_vec, b1, c1));
+
+                let c2 = _mm256_loadu_ps(c_ptr.add(16));
+                let b2 = _mm256_loadu_ps(b_ptr.add(16));
+                _mm256_storeu_ps(c_ptr.add(16), _mm256_fmadd_ps(a_vec, b2, c2));
+
+                let c3 = _mm256_loadu_ps(c_ptr.add(24));
+                let b3 = _mm256_loadu_ps(b_ptr.add(24));
+                _mm256_storeu_ps(c_ptr.add(24), _mm256_fmadd_ps(a_vec, b3, c3));
+
+                j += 32;
+            }
+
+            while j + 8 <= n {
+                let c_ptr = c.as_mut_ptr().add(c_row + j);
+                let b_ptr = b.as_ptr().add(b_row + j);
+
+                let c0 = _mm256_loadu_ps(c_ptr);
+                let b0 = _mm256_loadu_ps(b_ptr);
+                _mm256_storeu_ps(c_ptr, _mm256_fmadd_ps(a_vec, b0, c0));
+
+                j += 8;
+            }
+
+            while j < n {
+                *c.get_unchecked_mut(c_row + j) += a_val * *b.get_unchecked(b_row + j);
+                j += 1;
+            }
+        }
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -150,7 +220,12 @@ pub fn vector_add_f32_simd(a: &[f32], b: &[f32], c: &mut [f32]) -> Result<(), Co
 
     #[cfg(target_arch = "x86_64")]
     unsafe {
-        vector_add_f32_simd_x86_sse(a, b, c);
+        let (has_avx2, _) = crate::ops::detect_avx2_fma();
+        if has_avx2 && a.len() >= 32 {
+            vector_add_f32_simd_x86_avx2(a, b, c);
+        } else {
+            vector_add_f32_simd_x86_sse(a, b, c);
+        }
     }
 
     #[cfg(not(target_arch = "x86_64"))]
@@ -159,6 +234,38 @@ pub fn vector_add_f32_simd(a: &[f32], b: &[f32], c: &mut [f32]) -> Result<(), Co
     }
 
     Ok(())
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn vector_add_f32_simd_x86_avx2(a: &[f32], b: &[f32], c: &mut [f32]) {
+    use core::arch::x86_64::*;
+    let n = a.len();
+    let mut i = 0;
+    while i + 32 <= n {
+        let a_ptr = a.as_ptr().add(i);
+        let b_ptr = b.as_ptr().add(i);
+        let c_ptr = c.as_mut_ptr().add(i);
+
+        _mm256_storeu_ps(c_ptr, _mm256_add_ps(_mm256_loadu_ps(a_ptr), _mm256_loadu_ps(b_ptr)));
+        _mm256_storeu_ps(c_ptr.add(8), _mm256_add_ps(_mm256_loadu_ps(a_ptr.add(8)), _mm256_loadu_ps(b_ptr.add(8))));
+        _mm256_storeu_ps(c_ptr.add(16), _mm256_add_ps(_mm256_loadu_ps(a_ptr.add(16)), _mm256_loadu_ps(b_ptr.add(16))));
+        _mm256_storeu_ps(c_ptr.add(24), _mm256_add_ps(_mm256_loadu_ps(a_ptr.add(24)), _mm256_loadu_ps(b_ptr.add(24))));
+        i += 32;
+    }
+
+    while i + 8 <= n {
+        let a_ptr = a.as_ptr().add(i);
+        let b_ptr = b.as_ptr().add(i);
+        let c_ptr = c.as_mut_ptr().add(i);
+        _mm256_storeu_ps(c_ptr, _mm256_add_ps(_mm256_loadu_ps(a_ptr), _mm256_loadu_ps(b_ptr)));
+        i += 8;
+    }
+
+    while i < n {
+        *c.get_unchecked_mut(i) = *a.get_unchecked(i) + *b.get_unchecked(i);
+        i += 1;
+    }
 }
 
 #[cfg(target_arch = "x86_64")]

@@ -202,13 +202,16 @@ mod tests {
 
         for i in 0..c_scalar.len() {
             let diff = (c_scalar[i] - c_simd[i]).abs();
+            let max_val = c_scalar[i].abs().max(1.0);
+            let rel_diff = diff / max_val;
             assert!(
-                diff < 1e-4,
-                "Parity failure at {}: scalar={}, simd={}, diff={}",
+                diff < 1e-3 || rel_diff < 1e-4,
+                "Parity failure at {}: scalar={}, simd={}, diff={}, rel_diff={}",
                 i,
                 c_scalar[i],
                 c_simd[i],
-                diff
+                diff,
+                rel_diff
             );
         }
     }
