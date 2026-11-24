@@ -65,6 +65,12 @@ unsafe fn matmul_f32_simd_x86_avx2_fma(
                 let c_ptr = c.as_mut_ptr().add(c_row + j);
                 let b_ptr = b.as_ptr().add(b_row + j);
 
+                // Pré-aquecimento de cache L1/L2 uma janela à frente (64 bytes / 16 floats à frente)
+                if j + 48 <= n {
+                    _mm_prefetch(b_ptr.add(32) as *const i8, _MM_HINT_T0);
+                    _mm_prefetch(c_ptr.add(32) as *const i8, _MM_HINT_T0);
+                }
+
                 let c0 = _mm256_loadu_ps(c_ptr);
                 let b0 = _mm256_loadu_ps(b_ptr);
                 _mm256_storeu_ps(c_ptr, _mm256_fmadd_ps(a_vec, b0, c0));
@@ -129,6 +135,12 @@ unsafe fn matmul_f32_simd_x86_sse(
             while j + 16 <= n {
                 let c_ptr = c.as_mut_ptr().add(c_row + j);
                 let b_ptr = b.as_ptr().add(b_row + j);
+
+                // Pré-aquecimento de cache L1 uma janela à frente (64 bytes / 16 floats à frente)
+                if j + 32 <= n {
+                    _mm_prefetch(b_ptr.add(16) as *const i8, _MM_HINT_T0);
+                    _mm_prefetch(c_ptr.add(16) as *const i8, _MM_HINT_T0);
+                }
 
                 let c0 = _mm_loadu_ps(c_ptr);
                 let b0 = _mm_loadu_ps(b_ptr);

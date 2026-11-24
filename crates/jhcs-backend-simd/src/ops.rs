@@ -84,6 +84,9 @@ pub unsafe fn reduce_sum_f32_avx2(input: &[f32]) -> f32 {
     let mut acc3 = _mm256_setzero_ps();
 
     while i + 32 <= len {
+        if i + 64 <= len {
+            _mm_prefetch(ptr.add(i + 32) as *const i8, _MM_HINT_T0);
+        }
         acc0 = _mm256_add_ps(acc0, _mm256_loadu_ps(ptr.add(i)));
         acc1 = _mm256_add_ps(acc1, _mm256_loadu_ps(ptr.add(i + 8)));
         acc2 = _mm256_add_ps(acc2, _mm256_loadu_ps(ptr.add(i + 16)));
@@ -206,6 +209,9 @@ pub unsafe fn conv2d_f32_avx2_fma(
 
         // Processa 8 pixels horizontais de saída por ciclo
         while ox + 8 <= out_w {
+            if ox + 16 <= out_w {
+                _mm_prefetch(in_ptr.add(oy * in_w + ox + 8) as *const i8, _MM_HINT_T0);
+            }
             let mut acc = _mm256_setzero_ps();
 
             for ky in 0..k_h {
@@ -271,6 +277,14 @@ pub fn scale_image_rgba_simd(
         let row_src1 = sy1 * src_w;
 
         for x in 0..dst_w {
+            #[cfg(target_arch = "x86_64")]
+            unsafe {
+                if x + 16 < dst_w {
+                    let next_sx = ((x + 16) as u32 * x_ratio) >> 16;
+                    core::arch::x86_64::_mm_prefetch(src.as_ptr().add(row_src0 + next_sx as usize) as *const i8, core::arch::x86_64::_MM_HINT_T0);
+                }
+            }
+
             let sx = (x as u32 * x_ratio) >> 16;
             let x_diff = ((x as u32 * x_ratio) & 0xFFFF) as u32;
             let x_diff_inv = 0x10000 - x_diff;
@@ -305,6 +319,13 @@ pub fn alpha_blend_rgba_batch_simd(dst: &mut [u32], src: &[u32], len: usize) {
     let mut i = 0;
 
     while i < count {
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            if i + 16 < count {
+                core::arch::x86_64::_mm_prefetch(src.as_ptr().add(i + 16) as *const i8, core::arch::x86_64::_MM_HINT_T0);
+                core::arch::x86_64::_mm_prefetch(dst.as_ptr().add(i + 16) as *const i8, core::arch::x86_64::_MM_HINT_T0);
+            }
+        }
         let s = src[i];
         let sa = (s >> 24) & 0xFF;
         if sa == 255 {
@@ -392,6 +413,13 @@ pub fn box_blur_rgba_simd(
         }
 
         for x in 0..w {
+            #[cfg(target_arch = "x86_64")]
+            unsafe {
+                if x + r + 16 < w {
+                    core::arch::x86_64::_mm_prefetch(src.as_ptr().add(row_start + x + r + 16) as *const i8, core::arch::x86_64::_MM_HINT_T0);
+                }
+            }
+
             let avg_a = ((sum_a * inv_win) >> 24).min(255);
             let avg_r = ((sum_r * inv_win) >> 24).min(255);
             let avg_g = ((sum_g * inv_win) >> 24).min(255);
@@ -439,6 +467,13 @@ pub fn box_blur_rgba_simd(
         }
 
         for y in 0..h {
+            #[cfg(target_arch = "x86_64")]
+            unsafe {
+                if y + r + 8 < h {
+                    core::arch::x86_64::_mm_prefetch(scratch.as_ptr().add((y + r + 8) * w + x) as *const i8, core::arch::x86_64::_MM_HINT_T0);
+                }
+            }
+
             let avg_a = ((sum_a * inv_win) >> 24).min(255);
             let avg_r = ((sum_r * inv_win) >> 24).min(255);
             let avg_g = ((sum_g * inv_win) >> 24).min(255);
