@@ -12,7 +12,7 @@ pub mod matmul;
 pub mod ops;
 
 pub use matmul::{matmul_f32_simd, vector_add_f32_simd};
-pub use ops::{alpha_blend_rgba_batch_simd, conv2d_f32, conv2d_f32_scalar, reduce_sum_f32, reduce_sum_f32_scalar, scale_image_rgba_simd};
+pub use ops::{alpha_blend_rgba_batch_simd, box_blur_rgba_simd, conv2d_f32, conv2d_f32_scalar, reduce_sum_f32, reduce_sum_f32_scalar, scale_image_rgba_simd};
 
 use alloc::string::ToString;
 use jhcs_core::capabilities::{

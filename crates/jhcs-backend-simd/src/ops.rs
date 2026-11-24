@@ -330,3 +330,132 @@ pub fn alpha_blend_rgba_batch_simd(dst: &mut [u32], src: &[u32], len: usize) {
         i += 1;
     }
 }
+
+/// Desfoque de caixa bidimensional (Horizontal + Vertical) para buffers RGBA de 32 bits.
+///
+/// Utiliza acumuladores em janela móvel (moving average) com complexidade O(W * H)
+/// independente do raio de desfoque. Opera com separação horizontal e vertical
+/// para máxima localidade de cache e vetorização pelo compilador.
+pub fn box_blur_rgba_simd(
+    src: &[u32],
+    dst: &mut [u32],
+    scratch: &mut [u32],
+    w: usize,
+    h: usize,
+    radius: usize,
+) {
+    if w == 0 || h == 0 || radius == 0 {
+        let count = w * h;
+        if dst.len() >= count && src.len() >= count {
+            dst[..count].copy_from_slice(&src[..count]);
+        }
+        return;
+    }
+
+    let count = w * h;
+    if src.len() < count || dst.len() < count || scratch.len() < count {
+        return;
+    }
+
+    let r = radius.min(w.min(h) / 2).max(1);
+    let win_size = (2 * r + 1) as u32;
+
+    // Multiplicador de ponto fixo (24 bits) para evitar divisão inteira por pixel:
+    // (sum * inv_win) >> 24
+    let inv_win = ((1u64 << 24) / (win_size as u64)) as u32;
+
+    // ── Passagem 1: Horizontal (src -> scratch) ──────────────────────────────
+    for y in 0..h {
+        let row_start = y * w;
+        let mut sum_a = 0u32;
+        let mut sum_r = 0u32;
+        let mut sum_g = 0u32;
+        let mut sum_b = 0u32;
+
+        let first_px = src[row_start];
+        let fa = (first_px >> 24) & 0xFF;
+        let fr = (first_px >> 16) & 0xFF;
+        let fg = (first_px >> 8) & 0xFF;
+        let fb = first_px & 0xFF;
+
+        sum_a += fa * (r as u32 + 1);
+        sum_r += fr * (r as u32 + 1);
+        sum_g += fg * (r as u32 + 1);
+        sum_b += fb * (r as u32 + 1);
+
+        for i in 1..=r {
+            let px = src[row_start + i.min(w - 1)];
+            sum_a += (px >> 24) & 0xFF;
+            sum_r += (px >> 16) & 0xFF;
+            sum_g += (px >> 8) & 0xFF;
+            sum_b += px & 0xFF;
+        }
+
+        for x in 0..w {
+            let avg_a = ((sum_a * inv_win) >> 24).min(255);
+            let avg_r = ((sum_r * inv_win) >> 24).min(255);
+            let avg_g = ((sum_g * inv_win) >> 24).min(255);
+            let avg_b = ((sum_b * inv_win) >> 24).min(255);
+
+            scratch[row_start + x] = (avg_a << 24) | (avg_r << 16) | (avg_g << 8) | avg_b;
+
+            let left_idx = (x as isize - r as isize).max(0) as usize;
+            let right_idx = (x + r + 1).min(w - 1);
+
+            let px_out = src[row_start + left_idx];
+            let px_in = src[row_start + right_idx];
+
+            sum_a = sum_a.saturating_sub((px_out >> 24) & 0xFF) + ((px_in >> 24) & 0xFF);
+            sum_r = sum_r.saturating_sub((px_out >> 16) & 0xFF) + ((px_in >> 16) & 0xFF);
+            sum_g = sum_g.saturating_sub((px_out >> 8) & 0xFF) + ((px_in >> 8) & 0xFF);
+            sum_b = sum_b.saturating_sub(px_out & 0xFF) + (px_in & 0xFF);
+        }
+    }
+
+    // ── Passagem 2: Vertical (scratch -> dst) ────────────────────────────────
+    for x in 0..w {
+        let mut sum_a = 0u32;
+        let mut sum_r = 0u32;
+        let mut sum_g = 0u32;
+        let mut sum_b = 0u32;
+
+        let first_px = scratch[x];
+        let fa = (first_px >> 24) & 0xFF;
+        let fr = (first_px >> 16) & 0xFF;
+        let fg = (first_px >> 8) & 0xFF;
+        let fb = first_px & 0xFF;
+
+        sum_a += fa * (r as u32 + 1);
+        sum_r += fr * (r as u32 + 1);
+        sum_g += fg * (r as u32 + 1);
+        sum_b += fb * (r as u32 + 1);
+
+        for i in 1..=r {
+            let px = scratch[i.min(h - 1) * w + x];
+            sum_a += (px >> 24) & 0xFF;
+            sum_r += (px >> 16) & 0xFF;
+            sum_g += (px >> 8) & 0xFF;
+            sum_b += px & 0xFF;
+        }
+
+        for y in 0..h {
+            let avg_a = ((sum_a * inv_win) >> 24).min(255);
+            let avg_r = ((sum_r * inv_win) >> 24).min(255);
+            let avg_g = ((sum_g * inv_win) >> 24).min(255);
+            let avg_b = ((sum_b * inv_win) >> 24).min(255);
+
+            dst[y * w + x] = (avg_a << 24) | (avg_r << 16) | (avg_g << 8) | avg_b;
+
+            let top_idx = (y as isize - r as isize).max(0) as usize;
+            let bottom_idx = (y + r + 1).min(h - 1);
+
+            let px_out = scratch[top_idx * w + x];
+            let px_in = scratch[bottom_idx * w + x];
+
+            sum_a = sum_a.saturating_sub((px_out >> 24) & 0xFF) + ((px_in >> 24) & 0xFF);
+            sum_r = sum_r.saturating_sub((px_out >> 16) & 0xFF) + ((px_in >> 16) & 0xFF);
+            sum_g = sum_g.saturating_sub((px_out >> 8) & 0xFF) + ((px_in >> 8) & 0xFF);
+            sum_b = sum_b.saturating_sub(px_out & 0xFF) + (px_in & 0xFF);
+        }
+    }
+}
