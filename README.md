@@ -50,7 +50,7 @@ jhcs-rs/
 cargo test --workspace
 
 # 2. Executar benchmark de ponto de equilíbrio (breakeven) Escalar vs SIMD vs wgpu
-cargo run --release --example benchmark-breakeven
+cargo run --release -p benchmark-breakeven
 
 # 3. Validar compilação bare-metal (#![no_std]) das crates de núcleo e plataforma Jinn
 cargo check --target x86_64-unknown-none --no-default-features \

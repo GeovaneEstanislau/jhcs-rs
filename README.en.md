@@ -50,7 +50,7 @@ jhcs-rs/
 cargo test --workspace
 
 # 2. Run reproducible Scalar vs SIMD vs wgpu breakeven benchmark
-cargo run --release --example benchmark-breakeven
+cargo run --release -p benchmark-breakeven
 
 # 3. Verify #![no_std] bare-metal compilation for kernel/microkernel environments
 cargo check --target x86_64-unknown-none --no-default-features \
